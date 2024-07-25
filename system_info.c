@@ -145,11 +145,10 @@ double percent_cpu_usage()
 double percent_cpu_process()
 {
     static ULARGE_INTEGER lastCPU, lastSysIdle, lastSysKernel, lastSysUser;
-    static int numProcessors = -1; // Default to -1 to check if initialized
-    static HANDLE self = NULL;
+    static int numProcessors = -1;
     FILETIME ftime, fsysIdle, fsysKernel, fsysUser;
     ULARGE_INTEGER now, sysIdle, sysKernel, sysUser;
-    double percent;
+    double percent = 0.0;
 
     if (numProcessors == -1) // Initialization check
     {
@@ -161,8 +160,6 @@ double percent_cpu_process()
         GetSystemTimeAsFileTime(&ftime);
         memcpy(&lastCPU, &ftime, sizeof(FILETIME));
 
-        self = GetCurrentProcess();
-
         GetSystemTimes(&fsysIdle, &fsysKernel, &fsysUser);
         memcpy(&lastSysIdle, &fsysIdle, sizeof(FILETIME));
         memcpy(&lastSysKernel, &fsysKernel, sizeof(FILETIME));
@@ -170,13 +167,11 @@ double percent_cpu_process()
     }
 
     // Sleep before collecting data to ensure meaningful values
-    Sleep(1000); // Sleep for 1 second
+    Sleep(1000);
 
-    // Get the current system time
     GetSystemTimeAsFileTime(&ftime);
     memcpy(&now, &ftime, sizeof(FILETIME));
 
-    // Get the current system times
     if (!GetSystemTimes(&fsysIdle, &fsysKernel, &fsysUser))
     {
         return 0.0;
@@ -185,19 +180,16 @@ double percent_cpu_process()
     memcpy(&sysKernel, &fsysKernel, sizeof(FILETIME));
     memcpy(&sysUser, &fsysUser, sizeof(FILETIME));
 
-    // Calculate the differences
     ULONGLONG idleDiff = sysIdle.QuadPart - lastSysIdle.QuadPart;
     ULONGLONG kernelDiff = sysKernel.QuadPart - lastSysKernel.QuadPart;
     ULONGLONG userDiff = sysUser.QuadPart - lastSysUser.QuadPart;
     ULONGLONG totalDiff = kernelDiff + userDiff;
 
-    // Calculate the percentage
     if (totalDiff > 0)
     {
         percent = (100.0 * (kernelDiff + userDiff - idleDiff)) / totalDiff;
     }
 
-    // Update the last recorded times so the next run
     lastCPU = now;
     lastSysIdle = sysIdle;
     lastSysKernel = sysKernel;

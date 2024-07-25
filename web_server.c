@@ -24,7 +24,11 @@ void handle_client(SOCKET client_socket)
     // Define the HTTP response
     snprintf(response, sizeof(response),
              "HTTP/1.1 200 OK\r\n"
+             "Content-Type: text/html\r\n"
+             "\r\n"
+             "<!DOCTYPE HTML>"
              "<html>"
+             "<head><title>System Information</title></head>"
              "<body>"
              "<p> total_virtual_memory_avail %llu\n </p>"
              "<p> virtual_memory_used %llu\n </p>"
