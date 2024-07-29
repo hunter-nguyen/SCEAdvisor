@@ -1,132 +1,175 @@
-#include <stdio.h>
+#ifdef _WIN32
+#include <winsock2.h>
 #include <stdlib.h>
 #include <string.h>
-#include <winsock2.h>
 #include <ws2tcpip.h>
 #include "system_info.h"
-
+#include <unistd.h>
+#elif __linux__ // Include Linux, Unix headers
+#include "system_info.h"
+#include <unistd.h>
+#else // Include macOS headers
+#endif
+#include <stdio.h>
 #define PORT 8005
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 2048
 
 // Handle a client's request
+extern unsigned long long get_virtual_memory();
+extern unsigned long long get_virtual_memory_usage();
+extern unsigned long long get_virtual_memory_process();
+extern unsigned long long get_ram();
+extern unsigned long long get_ram_usage();
+extern unsigned long long get_ram_from_process();
+extern double percent_cpu_usage();
+extern double percent_cpu_process();
+
 void handle_client(SOCKET client_socket)
 {
-    unsigned long long total_virtual_memory_avail = get_virtual_memory();
-    unsigned long long virtual_memory_used = get_virtual_memory_usage();
-    unsigned long long virtual_memory_process = get_virtual_memory_process();
-    unsigned long long total_ram = get_ram();
-    unsigned long long ram_used = get_ram_usage();
-    unsigned long long ram_process = get_ram_from_process();
-    double percent_cpu = percent_cpu_usage();
-    double percent_cpu_process_usage = percent_cpu_process();
-
+    char request[BUFFER_SIZE];
     char response[BUFFER_SIZE];
-    // Define the HTTP response
-    snprintf(response, sizeof(response),
-             "HTTP/1.1 200 OK\r\n"
-             "Content-Type: text/html\r\n"
-             "\r\n"
-             "<!DOCTYPE HTML>"
-             "<html>"
-             "<head><title>System Information</title></head>"
-             "<body>"
-             "<p> total_virtual_memory_avail %llu\n </p>"
-             "<p> virtual_memory_used %llu\n </p>"
-             "<p> virtual_memory_process %llu\n </p>"
-             "<p> total_ram %llu\n </p>"
-             "<p> ram_used %llu\n </p>"
-             "<p> ram_process %llu\n </p>"
-             "<p> percent_cpu %.2f\n </p>"
-             "<p> percent_cpu_process_usage %.2f\n </p>"
-             "</body>"
-             "</html>",
-             total_virtual_memory_avail, virtual_memory_used, virtual_memory_process,
-             total_ram, ram_used, ram_process, percent_cpu, percent_cpu_process_usage);
+    char content_length[64];
 
-    // Send HTTP response to client,
-    if (send(client_socket, response, strlen(response), 0) == SOCKET_ERROR)
+    int received = recv(client_socket, request, sizeof(request), 0);
+    if (received <= 0)
     {
-        fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+        fprintf(stderr, "recv failed: %d\n", WSAGetLastError());
+        return;
     }
+
+    request[received] = '\0';
+
+    // Check if the request is for /metrics endpoint (localhost:PORT/metrics)
+    if (strstr(request, "GET /metrics HTTP/1.1") != NULL)
+    {
+        // Define the HTTP response
+        snprintf(response, sizeof(response),
+                 "# HELP total_virtual_memory_avail Total virtual memory available in bytes\n"
+                 "# TYPE total_virtual_memory_avail gauge\n"
+                 "total_virtual_memory_avail %llu\n"
+                 "# HELP virtual_memory_used Virtual memory used in bytes\n"
+                 "# TYPE virtual_memory_used gauge\n"
+                 "virtual_memory_used %llu\n"
+                 "# HELP virtual_memory_process Virtual memory used by process in bytes\n"
+                 "# TYPE virtual_memory_process gauge\n"
+                 "virtual_memory_process %llu\n"
+                 "# HELP total_ram Total ram available in bytes\n"
+                 "# TYPE total_ram gauge\n"
+                 "total_ram %llu\n"
+                 "# HELP ram_used Total ram used in bytes\n"
+                 "# TYPE ram_used gauge\n"
+                 "ram_used %llu\n"
+                 "# HELP ram_process Total ram used by process in bytes\n"
+                 "# TYPE ram_process gauge\n"
+                 "ram_process %llu\n"
+                 "# HELP percent_cpu Percentage of CPU usage\n"
+                 "# TYPE percent_cpu gauge\n"
+                 "percent_cpu %.2f\n"
+                 "# HELP percent_cpu_process_usage Percentage of CPU usage by process\n"
+                 "# TYPE percent_cpu_process_usage gauge\n"
+                 "percent_cpu_process_usage %.2f\n",
+                 get_virtual_memory(), get_virtual_memory_usage(), get_virtual_memory_process(),
+                 get_ram(), get_ram_usage(), get_ram_from_process(),
+                 percent_cpu_usage(), percent_cpu_process());
+
+        // Write HTTP headers
+        const char *headers = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n";
+        snprintf(content_length, sizeof(content_length), "Content-Length: %zu\r\n\r\n", strlen(response));
+
+        // Send headers and response
+        if (send(client_socket, headers, strlen(headers), 0) == SOCKET_ERROR)
+        {
+            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+        }
+        if (send(client_socket, content_length, strlen(content_length), 0) == SOCKET_ERROR)
+        {
+            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+        }
+        if (send(client_socket, response, strlen(response), 0) == SOCKET_ERROR)
+        {
+            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+        }
+    }
+    else
+    {
+        const char *not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        if (send(client_socket, not_found, strlen(not_found), 0) == SOCKET_ERROR)
+        {
+            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+        }
+    }
+    // Close the connection
+    closesocket(client_socket);
 }
 
 int main()
 {
-    WSADATA wsa_data;                            // store Windows Sockets APi data
-    SOCKET server_socket, client_socket;         // store server and client socket descriptors
-    struct sockaddr_in server_addr, client_addr; // structures to store server and client information
-    int client_addr_len = sizeof(client_addr);
+    int server_fd, client_sock;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
 
-    // Initialize Winsock
-    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0)
+#ifdef _WIN32
+    // Initialize Winsock for Windows
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
     {
-        fprintf(stderr, "WSAStartup Failed: %d\n", WSAGetLastError());
+        printf("Failed to initialize Winsock.\n");
+        return 1;
+    }
+#endif
+
+    // Create a socket for the server
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1)
+    {
+        perror("Socket creation failed");
         return 1;
     }
 
-    // Create a socket
-    server_socket = socket(AF_INET, SOCK_STREAM, 0); // Domain, Type, Protocol
-    if (server_socket == INVALID_SOCKET)
+    // Set up the server address structure
+    server_addr.sin_family = AF_INET;         // Address family (IPv4)
+    server_addr.sin_addr.s_addr = INADDR_ANY; // Accept connections from any IP address
+    server_addr.sin_port = htons(PORT);       // Port to listen on
+
+    // Bind the socket to the address and port
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
-        fprintf(stderr, "Socket creation failed: %d\n", WSAGetLastError());
-        WSACleanup();
+        perror("Bind failed");
         return 1;
     }
 
-    // Set socket option to reuse address
-    int optval = 1;
-    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval, sizeof(optval)) == SOCKET_ERROR)
+    // Start listening for incoming connections
+    if (listen(server_fd, 3) < 0)
     {
-        fprintf(stderr, "setsockopt(SO_REUSEADDR) failed: %d\n", WSAGetLastError());
-        closesocket(server_socket);
-        WSACleanup();
+        perror("Listen failed");
         return 1;
     }
 
-    // Configure the server address structure
-    server_addr.sin_family = AF_INET;         // IPv4
-    server_addr.sin_addr.s_addr = INADDR_ANY; // Bind to any available network interface
-    server_addr.sin_port = htons(PORT);       // Convert port number to network byte order
+    // Log that the server is now listening
+    printf("Listening on localhost:%d\n", PORT);
 
-    // Bind the socket to the specified IP and port
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == SOCKET_ERROR)
-    {
-        fprintf(stderr, "bind() failed with error %d\n", WSAGetLastError());
-        closesocket(server_socket);
-        WSACleanup();
-        return 1;
-    }
-
-    // Listen for incoming connections
-    if (listen(server_socket, SOMAXCONN) == SOCKET_ERROR)
-    {
-        fprintf(stderr, "Listen failed: %d\n", WSAGetLastError());
-        closesocket(server_socket);
-        WSACleanup();
-        return 1;
-    }
-
-    printf("Server is listening on port %d...\n", PORT);
-
-    // Loop to accept incoming connections
+    // Main server loop to accept and handle client connections
+    // Accept an incoming connection
     while (1)
     {
-        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client_socket == INVALID_SOCKET)
+        client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (client_sock >= 0)
         {
-            fprintf(stderr, "accept() failed with error %d\n", WSAGetLastError());
-            continue; // Continue to accept other connections if an error occurs
+            // Handle the client's request
+            handle_client(client_sock);
+            // Close the connection after handling
+            close(client_sock);
         }
-
-        // Handle the client's request
-        handle_client(client_socket);
-
-        Sleep(5000);
+        else
+        {
+            // Log an error if accepting the client fails
+            perror("Client accept failed");
+        }
     }
 
-    // Close the server socket
-    closesocket(server_socket);
-    WSACleanup();
+    // Close the server socket (this line will never be reached in the current loop)
+    close(server_fd);
 
     return 0;
 }
