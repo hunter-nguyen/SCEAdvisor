@@ -1,30 +1,14 @@
-#ifdef _WIN32
-#include <winsock2.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ws2tcpip.h>
-#include "system_info.h"
-#include <unistd.h>
-#elif __linux__ // Include Linux, Unix headers
-#include "system_info.h"
-#include <unistd.h>
-#else // Include macOS headers
-#endif
 #include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include "system_info.h"
+
 #define PORT 8005
 #define BUFFER_SIZE 2048
 
-// Handle a client's request
-extern unsigned long long get_virtual_memory();
-extern unsigned long long get_virtual_memory_usage();
-extern unsigned long long get_virtual_memory_process();
-extern unsigned long long get_ram();
-extern unsigned long long get_ram_usage();
-extern unsigned long long get_ram_from_process();
-extern double percent_cpu_usage();
-extern double percent_cpu_process();
-
-void handle_client(SOCKET client_socket)
+void handle_client(int client_socket)
 {
     char request[BUFFER_SIZE];
     char response[BUFFER_SIZE];
@@ -33,7 +17,7 @@ void handle_client(SOCKET client_socket)
     int received = recv(client_socket, request, sizeof(request), 0);
     if (received <= 0)
     {
-        fprintf(stderr, "recv failed: %d\n", WSAGetLastError());
+        perror("recv failed");
         return;
     }
 
@@ -68,39 +52,42 @@ void handle_client(SOCKET client_socket)
                  "# HELP percent_cpu_process_usage Percentage of CPU usage by process\n"
                  "# TYPE percent_cpu_process_usage gauge\n"
                  "percent_cpu_process_usage %.2f\n",
-                 get_virtual_memory(), get_virtual_memory_usage(), get_virtual_memory_process(),
-                 get_ram(), get_ram_usage(), get_ram_from_process(),
-                 percent_cpu_usage(), percent_cpu_process());
-
+                 linux_get_total_virtual_memory(),
+                 linux_get_virtual_memory_used(), linux_get_virtual_memory_process(),
+                 linux_get_total_ram(), linux_get_total_ram_usage(), linux_get_virtual_memory_process(),
+                 linux_percent_cpu_usage(), linux_percent_cpu_usage_process());
         // Write HTTP headers
         const char *headers = "HTTP/1.1 200 OK\r\n"
                               "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n";
         snprintf(content_length, sizeof(content_length), "Content-Length: %zu\r\n\r\n", strlen(response));
 
         // Send headers and response
-        if (send(client_socket, headers, strlen(headers), 0) == SOCKET_ERROR)
+        if (send(client_socket, headers, strlen(headers), 0) == -1)
         {
-            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+
+            perror("send failed");
         }
-        if (send(client_socket, content_length, strlen(content_length), 0) == SOCKET_ERROR)
+        if (send(client_socket, content_length, strlen(content_length), 0) == -1)
         {
-            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+
+            perror("send failed");
         }
-        if (send(client_socket, response, strlen(response), 0) == SOCKET_ERROR)
+        if (send(client_socket, response, strlen(response), 0) == -1)
         {
-            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+            perror("send failed");
         }
     }
     else
     {
         const char *not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-        if (send(client_socket, not_found, strlen(not_found), 0) == SOCKET_ERROR)
+        if (send(client_socket, not_found, strlen(not_found), 0) == -1)
         {
-            fprintf(stderr, "send failed: %d\n", WSAGetLastError());
+            perror("send failed");
         }
     }
+
     // Close the connection
-    closesocket(client_socket);
+    close(client_socket);
 }
 
 int main()
@@ -108,16 +95,6 @@ int main()
     int server_fd, client_sock;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
-
-#ifdef _WIN32
-    // Initialize Winsock for Windows
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-    {
-        printf("Failed to initialize Winsock.\n");
-        return 1;
-    }
-#endif
 
     // Create a socket for the server
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -158,18 +135,12 @@ int main()
         {
             // Handle the client's request
             handle_client(client_sock);
-            // Close the connection after handling
-            close(client_sock);
         }
         else
         {
-            // Log an error if accepting the client fails
             perror("Client accept failed");
         }
     }
-
-    // Close the server socket (this line will never be reached in the current loop)
     close(server_fd);
-
     return 0;
 }

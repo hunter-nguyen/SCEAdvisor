@@ -1,24 +1,39 @@
 # Compiler and flags
 CC = gcc
 CFLAGS = -Wall -g
-LDFLAGS = -lws2_32 -lpdh
 
-# Target executable and object files
-SRCS = web_server.c system_info.c
-OBJS = $(SRCS:.c=.o)
+# Targets
+TARGET_LINUX = linux_web_server
+TARGET_WINDOWS = windows_web_server
 
-TARGET = web_server
+# Source files for each platform
+SRCS_LINUX = linux_web_server.c linux_system_info.c
+SRCS_WINDOWS = windows_web_server.c windows_system_info.c
 
-all: $(TARGET)
+# Object files for each platform
+OBJS_LINUX = $(SRCS_LINUX:.c=.o)
+OBJS_WINDOWS = $(SRCS_WINDOWS:.c=.o)
 
-# Rule to link object files into the executable
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
+# Include directory for headers
+INCLUDE_DIR = .
 
-# Rule to compile C source files into object files
+# Linux build rules
+$(TARGET_LINUX): $(OBJS_LINUX)
+	$(CC) $(CFLAGS) -o $(TARGET_LINUX) $(OBJS_LINUX)
+
+# Rule for compiling .c files to .o files on Linux
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
-# Clean to remove generated files
+	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) -c $< -o $@
+
+# Windows build rules (with Windows-specific libraries)
+$(TARGET_WINDOWS): $(OBJS_WINDOWS)
+	$(CC) $(CFLAGS) -o $(TARGET_WINDOWS) $(OBJS_WINDOWS) -lws2_32 -lpdh
+
+# Rule for compiling .c files to .o files on Windows
+%.o: %.c
+	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) -c $< -o $@ -D_WINDOWS
+
+# Clean up
 clean:
 	echo "Cleaning up"
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS_LINUX) $(TARGET_LINUX) $(OBJS_WINDOWS) $(TARGET_WINDOWS)
