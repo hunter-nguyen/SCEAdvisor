@@ -38,5 +38,6 @@ To clean up all build files for both Linux and Windows, run:
 
 ## Docker
 To build and run using Docker, run:
-```cd docker
+```
+cd docker
 docker-compose up```
