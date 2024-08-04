@@ -37,7 +37,11 @@ To clean up all build files for both Linux and Windows, run:
 ```make clean```
 
 ## Docker
-To build and run using Docker, run:
+To build Prometheus and Grafana servers using Docker, run:
 ```
 cd docker
-docker-compose up```
+docker-compose build
+```
+then run ```docker-compose up``` to run.
+---
+
