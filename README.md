@@ -25,7 +25,7 @@ To build for Windows, run:
 
 ## Running
 ### Linux
-After running, to start the server with Linux, run:
+After building, to start the server with Linux, run:
 ```./linux_web_server```
 
 ### Windows
