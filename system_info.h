@@ -10,7 +10,6 @@ unsigned long long get_ram_usage();
 unsigned long long get_ram_from_process();
 double percent_cpu_usage();
 double percent_cpu_process();
-void handle_client(int client_socket);
 
 #elif __linux__
 #include <sys/types.h>
